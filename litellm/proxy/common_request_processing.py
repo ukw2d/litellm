@@ -74,7 +74,7 @@ from litellm.router import Router
 from litellm.router_utils.add_retry_fallback_headers import get_hidden_params_dict
 from litellm.router_utils.common_utils import resolve_model_group_alias
 from litellm.types.guardrails import GuardrailEventHooks
-from litellm.types.router import RouterRateLimitError
+from litellm.types.router import RouterRateLimitError, validate_router_weights
 
 _LateResponseT = TypeVar("_LateResponseT", bound=Response)
 _LlmCallT = TypeVar("_LlmCallT")
@@ -1929,6 +1929,7 @@ class ProxyBaseLLMRequestProcessing:
             # This avoids expensive Router instantiation on each request
             if router_settings is not None:
                 self.data["router_settings_override"] = router_settings
+                self.data["_router_weights"] = validate_router_weights(router_settings.get("weights"))
                 alias_target: Final = await _resolve_per_request_model_group_alias(
                     requested_model=self.data.get("model"),
                     router_settings=router_settings,

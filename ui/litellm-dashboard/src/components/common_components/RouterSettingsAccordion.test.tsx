@@ -1,13 +1,27 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactElement, ReactNode } from "react";
+import { createRef, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RouterSettingsFormValue } from "../router_settings/RouterSettingsForm";
 import { fetchAvailableModels, fetchAvailableModelsForTeam } from "@/components/llm_calls/fetch_models";
-import RouterSettingsAccordion, { RouterSettingsAccordionValue } from "./RouterSettingsAccordion";
+import RouterSettingsAccordion, {
+  RouterSettingsAccordionRef,
+  RouterSettingsAccordionValue,
+} from "./RouterSettingsAccordion";
+import type { ProviderWeightsValue } from "../router_settings/providerWeightUtils";
 
 vi.mock("../networking", () => ({
   getRouterSettingsCall: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("../router_settings/ProviderWeights", () => ({
+  default: ({ value, onChange }: { value: ProviderWeightsValue; onChange: (next: ProviderWeightsValue) => void }) => (
+    <div>
+      <div data-testid="provider-weights">{JSON.stringify(value)}</div>
+      <button onClick={() => onChange({ chat: { a: 4, b: 1 } })}>change-weights</button>
+      <button onClick={() => onChange({})}>clear-weights</button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/llm_calls/fetch_models", () => ({
@@ -62,6 +76,28 @@ describe("RouterSettingsAccordion", () => {
     });
     onChange.mockClear();
   };
+
+  it("preserves deployment weights through immediate ref saves, external reloads and clears", async () => {
+    const ref = createRef<RouterSettingsAccordionRef>();
+    const initial = { router_settings: { weights: { chat: { a: 3, b: 1 } } } };
+    const { rerender } = renderWithQueryClient(
+      <RouterSettingsAccordion accessToken="token" ref={ref} value={initial} />,
+    );
+    expect(ref.current?.getValue().router_settings.weights).toEqual(initial.router_settings.weights);
+    fireEvent.click(screen.getByText("change-weights"));
+    expect(ref.current?.getValue().router_settings.weights).toEqual({ chat: { a: 4, b: 1 } });
+    rerender(
+      <RouterSettingsAccordion
+        accessToken="token"
+        ref={ref}
+        value={{ router_settings: { weights: { chat: { a: 1, b: 9 } } } }}
+      />,
+    );
+    expect(screen.getByTestId("provider-weights")).toHaveTextContent('{"chat":{"a":1,"b":9}}');
+    expect(ref.current?.getValue().router_settings.weights).toEqual({ chat: { a: 1, b: 9 } });
+    fireEvent.click(screen.getByText("clear-weights"));
+    expect(ref.current?.getValue().router_settings.weights).toBeNull();
+  });
 
   it("debounces propagation and calls onChange once with the last value", async () => {
     const onChange = vi.fn<(value: RouterSettingsAccordionValue) => void>();

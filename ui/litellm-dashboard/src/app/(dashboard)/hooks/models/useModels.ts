@@ -166,6 +166,7 @@ export const fetchAllModelDeployments = async (
   accessToken: string,
   userId: string,
   userRole: string,
+  teamId?: string,
 ): Promise<AutoRouterDeployment[]> => {
   const firstPage: PaginatedModelInfoResponse = await modelInfoCall(
     accessToken,
@@ -173,11 +174,23 @@ export const fetchAllModelDeployments = async (
     userRole,
     1,
     AUTO_ROUTER_LOOKUP_PAGE_SIZE,
+    undefined,
+    undefined,
+    teamId,
   );
   const totalPages = firstPage?.total_pages ?? 1;
   const remainingPages = await Promise.all(
     Array.from({ length: Math.max(0, totalPages - 1) }, (_unused, index) =>
-      modelInfoCall(accessToken, userId, userRole, index + 2, AUTO_ROUTER_LOOKUP_PAGE_SIZE),
+      modelInfoCall(
+        accessToken,
+        userId,
+        userRole,
+        index + 2,
+        AUTO_ROUTER_LOOKUP_PAGE_SIZE,
+        undefined,
+        undefined,
+        teamId,
+      ),
     ),
   );
   return [firstPage, ...remainingPages].flatMap(

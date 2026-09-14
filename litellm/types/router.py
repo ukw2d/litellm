@@ -6,10 +6,19 @@ import datetime
 import enum
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Generic, Literal, TypeVar, get_type_hints
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Final, Generic, Literal, TypeVar, get_type_hints
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 from typing_extensions import Protocol, ReadOnly, Required, TypedDict, runtime_checkable
 
 from litellm._logging import verbose_logger
@@ -125,6 +134,25 @@ OptionalPreCallChecks = list[
 ]
 
 
+def _validate_positive_router_weights(weights: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    if any(group and not any(weight > 0 for weight in group.values()) for group in weights.values()):
+        raise ValueError("Each nonempty weights group must contain at least one positive weight")
+    return weights
+
+
+RouterWeightIdentifier = Annotated[str, Field(strict=True, min_length=1, pattern=r"\S")]
+RouterWeight = Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)]
+RouterWeights = Annotated[
+    dict[RouterWeightIdentifier, dict[RouterWeightIdentifier, RouterWeight]],
+    AfterValidator(_validate_positive_router_weights),
+]
+_ROUTER_WEIGHTS_ADAPTER: Final[TypeAdapter[RouterWeights | None]] = TypeAdapter(RouterWeights | None)
+
+
+def validate_router_weights(value: object) -> RouterWeights | None:
+    return _ROUTER_WEIGHTS_ADAPTER.validate_python(value)
+
+
 class UpdateRouterConfig(BaseModel):
     """
     Set of params that you can modify via `router.update_settings()`.
@@ -146,10 +174,26 @@ class UpdateRouterConfig(BaseModel):
     context_window_fallbacks: list[dict] | None = None
     model_group_alias: dict[str, str | dict] | None = {}
     enable_tag_filtering: bool | None = None
+    weights: RouterWeights | None = None
     tag_routing_prefix: str | None = None
     optional_pre_call_checks: OptionalPreCallChecks | None = None
 
     model_config = ConfigDict(protected_namespaces=())
+
+
+_ROUTER_SETTINGS_DICT_ADAPTER: Final = TypeAdapter(dict[str, object])
+
+
+def _validate_router_settings_dict(value: object) -> dict[str, object]:
+    settings: Final = _ROUTER_SETTINGS_DICT_ADAPTER.validate_python(value)
+    validate_router_weights(settings.get("weights"))
+    return settings
+
+
+RouterSettingsDict = Annotated[
+    dict[str, object],
+    BeforeValidator(_validate_router_settings_dict, json_schema_input_type=UpdateRouterConfig),
+]
 
 
 def _as_utc(value: datetime.datetime | None) -> datetime.datetime | None:

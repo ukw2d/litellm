@@ -32739,9 +32739,7 @@ export interface components {
             /** Prompts */
             prompts?: string[] | null;
             /** Router Settings */
-            router_settings?: {
-                [key: string]: unknown;
-            } | null;
+            router_settings?: components["schemas"]["UpdateRouterConfig"] | null;
             /** Rpm Limit */
             rpm_limit?: number | null;
             /** Rpm Limit Type */
@@ -33492,9 +33490,7 @@ export interface components {
             /** Prompts */
             prompts?: string[] | null;
             /** Router Settings */
-            router_settings?: {
-                [key: string]: unknown;
-            } | null;
+            router_settings?: components["schemas"]["UpdateRouterConfig"] | null;
             /** Rpm Limit */
             rpm_limit?: number | null;
             /** Secret Manager Settings */
@@ -38447,6 +38443,12 @@ export interface components {
             tag_routing_prefix?: string | null;
             /** Timeout */
             timeout?: number | null;
+            /** Weights */
+            weights?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            } | null;
         };
         /** UpdateSearchToolRequest */
         UpdateSearchToolRequest: {
@@ -38544,9 +38546,7 @@ export interface components {
             /** Prompts */
             prompts?: string[] | null;
             /** Router Settings */
-            router_settings?: {
-                [key: string]: unknown;
-            } | null;
+            router_settings?: components["schemas"]["UpdateRouterConfig"] | null;
             /** Rpm Limit */
             rpm_limit?: number | null;
             /** Secret Manager Settings */

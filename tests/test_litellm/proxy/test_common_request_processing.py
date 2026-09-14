@@ -6883,6 +6883,95 @@ class TestModelDeploymentsSupportStreamOptions:
         assert self._support(None, None) is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "key_settings, team_settings, expected_id",
+    [
+        ({"weights": {"weighted-model": {"global": 100}}}, {"weights": {"weighted-model": {"scoped": 100}}}, "global"),
+        ({"weights": {"weighted-model": {"scoped": 100}}}, {"weights": {"weighted-model": {"global": 100}}}, "scoped"),
+        (None, {"weights": {"weighted-model": {"scoped": 100}}}, "scoped"),
+        ({"timeout": 30}, {"weights": {"weighted-model": {"scoped": 100}}}, "global"),
+        ({"weights": {}}, {"weights": {"weighted-model": {"scoped": 100}}}, "global"),
+        ({"weights": None}, {"weights": {"weighted-model": {"scoped": 100}}}, "global"),
+        (None, None, "global"),
+    ],
+    ids=["key-over-team", "key-scoped", "team", "whole-key-precedence", "cleared-key", "null-key", "global"],
+)
+async def test_saved_router_weights_survive_real_ingestion_and_ignore_caller_spoofing(
+    monkeypatch, key_settings, team_settings, expected_id
+):
+    from litellm.proxy import proxy_server
+    from litellm.proxy.route_llm_request import route_request
+
+    router = litellm.Router(
+        model_list=[
+            {
+                "model_name": "weighted-model",
+                "litellm_params": {
+                    "model": "gpt-4o", "api_key": "sk-test", "mock_response": "global", "weight": 100,
+                },
+                "model_info": {"id": "global"},
+            },
+            {
+                "model_name": "weighted-model",
+                "litellm_params": {
+                    "model": "gpt-4o", "api_key": "sk-test", "mock_response": "scoped", "weight": 0,
+                },
+                "model_info": {"id": "scoped"},
+            },
+        ],
+        num_retries=0,
+    )
+    monkeypatch.setattr(proxy_server, "llm_router", router)
+    monkeypatch.setattr(proxy_server, "prisma_client", None)
+    monkeypatch.setattr(
+        proxy_server,
+        "get_team_object",
+        AsyncMock(return_value=SimpleNamespace(router_settings=team_settings)),
+    )
+    user = ProxyUserAPIKeyAuth(api_key="hashed-key", models=[], team_id="team-a", router_settings=key_settings)
+    forged_weights = {"weighted-model": {"scoped": 100}}
+    processor = ProxyBaseLLMRequestProcessing(
+        data={
+            "model": "weighted-model",
+            "messages": [{"role": "user", "content": "hi"}],
+            "weights": forged_weights,
+            "_router_weights": forged_weights,
+            "router_settings_override": {"weights": forged_weights},
+        }
+    )
+    request = Request(
+        {
+            "type": "http", "method": "POST", "scheme": "http", "path": "/v1/chat/completions",
+            "headers": [], "query_string": b"", "server": ("localhost", 4000), "client": ("127.0.0.1", 1234),
+        }
+    )
+    logging = MagicMock(spec=ProxyLogging)
+    logging.pre_call_hook = AsyncMock(side_effect=lambda user_api_key_dict, data, call_type: data)
+
+    data, _ = await processor.common_processing_pre_call_logic(
+        request=request,
+        general_settings={},
+        user_api_key_dict=user,
+        proxy_logging_obj=logging,
+        proxy_config=proxy_server.ProxyConfig(),
+        route_type="acompletion",
+        llm_router=router,
+    )
+    saved_settings = key_settings if key_settings is not None else team_settings
+    assert "weights" not in data
+    assert data.get("_router_weights") == (saved_settings or {}).get("weights")
+    assert logging.pre_call_hook.call_args.kwargs["data"].get("_router_weights") == data.get("_router_weights")
+
+    completion_call = await route_request(
+        data=data, llm_router=router, user_model=None, route_type="acompletion", user_api_key_dict=user
+    )
+    response = await completion_call
+
+    assert response._hidden_params["model_id"] == expected_id
+    assert response.choices[0].message.content == expected_id
+
+
 class TestPerRequestModelGroupAlias:
     """``router_settings.model_group_alias`` on a key or team has to be resolved
     by the proxy: the Router resolves aliases from its own shared instance

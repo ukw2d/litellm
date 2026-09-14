@@ -4,6 +4,7 @@ import type { RouterSettingsAccordionValue } from "../common_components/RouterSe
 import type { BudgetWindowEntry } from "../key_team_helpers/BudgetWindowsEditor";
 import type { ModelMaxBudget } from "../key_team_helpers/ModelMaxBudgetEditor";
 import { tagRowsToLimits, type TagRateLimitEntry } from "../key_team_helpers/TagRateLimitEditor";
+import { providerWeightsError } from "../router_settings/providerWeightUtils";
 
 export interface KeyLoggingSetting {
   callback_name?: string;
@@ -39,7 +40,8 @@ export type KeyPayloadResult =
       readonly endpoint: "standard" | "service_account";
     }
   | { readonly kind: "duplicate_alias"; readonly alias: string; readonly teamId: string | null }
-  | { readonly kind: "agent_not_selected" };
+  | { readonly kind: "agent_not_selected" }
+  | { readonly kind: "invalid_provider_weights"; readonly message: string };
 
 interface McpSelection {
   readonly servers?: unknown[];
@@ -191,6 +193,8 @@ export const buildKeyCreatePayload = (input: KeyCreateInput): KeyPayloadResult =
   );
   const { tag_rpm_limit } = tagRowsToLimits(input.tagRateLimits);
   const routerSettings = input.routerSettings?.router_settings;
+  const weightsError = providerWeightsError(routerSettings?.weights);
+  if (weightsError) return { kind: "invalid_provider_weights", message: weightsError };
   const configuredRouterSettings =
     routerSettings &&
     Object.values(routerSettings).some((value) => value !== null && value !== undefined && value !== "")

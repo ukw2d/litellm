@@ -450,6 +450,10 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
           `Key alias ${built.alias} already exists for team with ID ${built.teamId}, please provide another key alias`,
         );
       }
+      if (built.kind === "invalid_provider_weights") {
+        toast.fromError(built.message);
+        return;
+      }
 
       toast.info("Making API Call");
       setIsModalVisible(true);
@@ -1658,6 +1662,7 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                               key={routerSettingsKey}
                               ref={routerSettingsRef}
                               accessToken={accessToken || ""}
+                              teamId={selectedCreateKeyTeam?.team_id}
                               value={routerSettings || undefined}
                               onChange={setRouterSettings}
                               modelData={

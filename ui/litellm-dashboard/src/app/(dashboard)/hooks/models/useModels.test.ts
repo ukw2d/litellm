@@ -1080,7 +1080,16 @@ describe("useAutoRouterModelGroups", () => {
     renderHook(() => useAutoRouterModelGroups(), { wrapper });
 
     await waitFor(() => expect(modelInfoCall).toHaveBeenCalled());
-    expect(modelInfoCall).toHaveBeenCalledWith("test-access-token", "test-user-id", "Admin", 1, 1000);
+    expect(modelInfoCall).toHaveBeenCalledWith(
+      "test-access-token",
+      "test-user-id",
+      "Admin",
+      1,
+      1000,
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(modelInfoCall).toHaveBeenCalledTimes(1);
   });
 
@@ -1118,7 +1127,16 @@ describe("useAutoRouterModelGroups", () => {
     await waitFor(() => expect(result.current.size).toBe(1));
     expect(result.current.has("late-router")).toBe(true);
     expect(modelInfoCall).toHaveBeenCalledTimes(3);
-    expect(modelInfoCall).toHaveBeenCalledWith("test-access-token", "test-user-id", "Admin", 3, 1000);
+    expect(modelInfoCall).toHaveBeenCalledWith(
+      "test-access-token",
+      "test-user-id",
+      "Admin",
+      3,
+      1000,
+      undefined,
+      undefined,
+      undefined,
+    );
   });
 
   it("uses every page for configured chat groups and keeps custom deployments without mode metadata", async () => {

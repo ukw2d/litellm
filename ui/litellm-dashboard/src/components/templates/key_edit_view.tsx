@@ -24,6 +24,7 @@ import RateLimitTypeFormItem from "../common_components/RateLimitTypeFormItem";
 import OrganizationDropdown from "../common_components/OrganizationDropdown";
 import RouterSettingsAccordion, { RouterSettingsAccordionRef } from "../common_components/RouterSettingsAccordion";
 import { routerSettingsEditorValue, routerSettingsUpdate } from "../common_components/routerSettingsPayload";
+import { providerWeightsError } from "../router_settings/providerWeightUtils";
 import { estimateTooltips, withNormalizedEstimates } from "./estimatedOutputTokens";
 import {
   currentValuePlaceholder,
@@ -287,6 +288,11 @@ export function KeyEditView({
         routerSettingsRef.current?.getValue()?.router_settings,
         keyData.router_settings,
       );
+      const weightsError = providerWeightsError(routerSettings?.weights);
+      if (weightsError) {
+        toast.fromError(weightsError);
+        return;
+      }
       if (routerSettings) {
         values.router_settings = routerSettings;
       }

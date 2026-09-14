@@ -11,6 +11,8 @@ vi.mock("../networking", () => ({
   getRouterSettingsCall: vi.fn().mockResolvedValue({}),
 }));
 
+vi.mock("../router_settings/ProviderWeights", () => ({ default: () => null }));
+
 vi.mock("@/components/llm_calls/fetch_models", () => ({
   fetchAvailableModels: vi.fn().mockResolvedValue([{ model_group: "gpt-5.5" }, { model_group: "gpt-4o-mini" }]),
   fetchAvailableModelsForTeam: vi.fn().mockResolvedValue([]),

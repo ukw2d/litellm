@@ -1120,3 +1120,105 @@ class TestUpdateMetadataFieldsPremiumCheck:
         }
         _update_metadata_fields(updated_kv)
         mock_check.assert_called()
+
+
+def _weight_validation_router(deployment_id="config-id", model_info=None):
+    from litellm import Router
+
+    return Router(model_list=[{
+        "model_name": "group",
+        "litellm_params": {"model": "openai/gpt-5.4-mini", "api_key": "test"},
+        "model_info": {"id": deployment_id, **(model_info or {})},
+    }])
+
+
+def _weight_validation_db(rows=()):
+    from types import SimpleNamespace
+
+    table = SimpleNamespace(find_many=AsyncMock(return_value=list(rows)))
+    return SimpleNamespace(db=SimpleNamespace(litellm_proxymodeltable=table))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["config", "db", "db-new-on-other-pod"])
+async def test_router_weights_validate_authoritative_model_sources(source):
+    from types import SimpleNamespace
+    from litellm.proxy.management_endpoints.common_utils import validate_router_settings_weights
+
+    db_row = SimpleNamespace(model_id="db-id", model_name="group", model_info={})
+    db = _weight_validation_db([db_row] if source != "config" else [])
+    router = _weight_validation_router("db-id" if source == "db" else "config-id", {"db_model": source == "db"})
+    deployment_id = "config-id" if source == "config" else "db-id"
+    await validate_router_settings_weights(
+        {"weights": {"group": {deployment_id: 1}}},
+        team_id=None, prisma_client=db, llm_router=router,
+    )
+    db.db.litellm_proxymodeltable.find_many.assert_awaited_once_with(
+        where={"model_id": {"in": [deployment_id]}}
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["unknown", "wrong-group", "foreign-team", "stale-deleted", "stale-renamed"])
+async def test_router_weights_reject_invalid_authoritative_references(case):
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from litellm.proxy.management_endpoints.common_utils import validate_router_settings_weights
+
+    info = {"team_id": "other-team"} if case == "foreign-team" else {"db_model": case.startswith("stale")}
+    router = _weight_validation_router(model_info=info)
+    rows = [SimpleNamespace(model_id="config-id", model_name="renamed", model_info={})] if case == "stale-renamed" else []
+    db = _weight_validation_db(rows)
+    deployment_id = "unknown-id" if case == "unknown" else "config-id"
+    model_group = "wrong-group" if case == "wrong-group" else "group"
+    with pytest.raises(HTTPException) as error:
+        await validate_router_settings_weights(
+            {"weights": {model_group: {deployment_id: 1}}},
+            team_id="team", prisma_client=db, llm_router=router,
+        )
+    assert error.value.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["config", "db"])
+async def test_router_weights_accept_team_public_model_names(source):
+    from types import SimpleNamespace
+    from litellm.proxy.management_endpoints.common_utils import validate_router_settings_weights
+
+    model_info = {"team_id": "team", "team_public_model_name": "team-model"}
+    rows = [SimpleNamespace(model_id="db-id", model_name="internal-name", model_info=model_info)] if source == "db" else []
+    db = _weight_validation_db(rows)
+    router = _weight_validation_router(model_info=model_info)
+    deployment_id = "db-id" if source == "db" else "config-id"
+    await validate_router_settings_weights(
+        {"weights": {"team-model": {deployment_id: 1}}},
+        team_id="team", prisma_client=db, llm_router=router,
+    )
+    with pytest.raises(Exception, match="does not belong to this team"):
+        await validate_router_settings_weights(
+            {"weights": {"team-model": {deployment_id: 1}}},
+            team_id=None, prisma_client=db, llm_router=router,
+        )
+
+
+@pytest.mark.asyncio
+async def test_router_weights_db_failure_cannot_validate_a_stale_snapshot():
+    from litellm.proxy.management_endpoints.common_utils import validate_router_settings_weights
+
+    db = _weight_validation_db()
+    db.db.litellm_proxymodeltable.find_many.side_effect = RuntimeError("database offline")
+    with pytest.raises(RuntimeError, match="database offline"):
+        await validate_router_settings_weights(
+            {"weights": {"group": {"config-id": 1}}},
+            team_id=None, prisma_client=db, llm_router=_weight_validation_router(model_info={"db_model": True}),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("settings", [None, {}, {"num_retries": 2}, {"weights": None}, {"weights": {}}, {"weights": {"group": {}}}])
+async def test_clearing_router_weights_needs_no_registry(settings):
+    from litellm.proxy.management_endpoints.common_utils import validate_router_settings_weights
+
+    db = _weight_validation_db()
+    await validate_router_settings_weights(settings, team_id=None, prisma_client=db, llm_router=None)
+    db.db.litellm_proxymodeltable.find_many.assert_not_awaited()

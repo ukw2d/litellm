@@ -1,9 +1,9 @@
 import math
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Final, Optional, Union
+from typing import TYPE_CHECKING, Annotated, Any, Final, Optional, Union
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, BeforeValidator
 
 
 # Defined above the `litellm.proxy.*` imports so the name is bound even when
@@ -73,10 +73,87 @@ from litellm.proxy._types import (  # noqa: F401  re-exported
 from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.utils import _premium_user_check
 from litellm.repositories.team_repository import TeamRepository
+from litellm.types.router import Deployment, UpdateRouterConfig, validate_router_weights
 
 if TYPE_CHECKING:
     from litellm.proxy._types import NewProjectRequest, UpdateProjectRequest
     from litellm.proxy.utils import PrismaClient, ProxyLogging
+    from litellm.router import Router
+
+
+class _RouterWeightModelInfo(BaseModel):
+    team_id: str | None = None
+    team_public_model_name: str | None = None
+
+
+def _router_weight_model_info(value: object) -> _RouterWeightModelInfo:
+    if isinstance(value, str):
+        return _RouterWeightModelInfo.model_validate_json(value)
+    return _RouterWeightModelInfo.model_validate(value or {}, from_attributes=True)
+
+
+class _RouterWeightDeployment(BaseModel):
+    model_name: str
+    model_info: Annotated[_RouterWeightModelInfo, BeforeValidator(_router_weight_model_info)]
+
+
+def _validate_router_weight_reference(
+    model_group: str,
+    deployment_id: str,
+    team_id: str | None,
+    stored: _RouterWeightDeployment | None,
+    configured: Deployment | None,
+) -> None:
+    if stored is None and (configured is None or configured.model_info.db_model):
+        raise HTTPException(status_code=400, detail=f"Unknown deployment ID in router weights: {deployment_id}")
+    reference: Final = (
+        stored if stored is not None else _RouterWeightDeployment.model_validate(configured, from_attributes=True)
+    )
+    if reference.model_info.team_id is not None and reference.model_info.team_id != team_id:
+        raise HTTPException(status_code=400, detail=f"Deployment {deployment_id} does not belong to this team")
+    if model_group not in (reference.model_name, reference.model_info.team_public_model_name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Deployment {deployment_id} does not belong to model group {model_group}",
+        )
+
+
+async def validate_router_settings_weights(
+    router_settings: UpdateRouterConfig | Mapping[str, object] | None,
+    *,
+    team_id: str | None,
+    prisma_client: "PrismaClient | None",
+    llm_router: "Router | None",
+) -> None:
+    from litellm.repositories.model_repository import ModelRepository
+
+    weights: Final = (
+        router_settings.weights
+        if isinstance(router_settings, UpdateRouterConfig)
+        else validate_router_weights(router_settings.get("weights") if router_settings is not None else None)
+    )
+    if not weights:
+        return
+    deployment_ids: Final = frozenset(deployment_id for group in weights.values() for deployment_id in group)
+    if not deployment_ids:
+        return
+    if prisma_client is None:
+        raise HTTPException(status_code=503, detail="Database unavailable while validating router weights")
+    stored_models: Final = await ModelRepository(prisma_client).table.find_many(
+        where={"model_id": {"in": list(deployment_ids)}}
+    )
+    stored_by_id: Final = {
+        row.model_id: _RouterWeightDeployment.model_validate(row, from_attributes=True) for row in stored_models
+    }
+    for model_group, group_weights in weights.items():
+        for deployment_id in group_weights:
+            _validate_router_weight_reference(
+                model_group,
+                deployment_id,
+                team_id,
+                stored_by_id.get(deployment_id),
+                llm_router.get_deployment(model_id=deployment_id) if llm_router is not None else None,
+            )
 
 
 def require_caller_user_id_for_non_admin(

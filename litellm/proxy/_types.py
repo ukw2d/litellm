@@ -46,7 +46,7 @@ from litellm.types.proxy.carried_budget_state import (
     UserBudgetSnapshot,
 )
 from litellm.types.proxy.control_plane_endpoints import WorkerRegistryEntry
-from litellm.types.router import RouterErrors, UpdateRouterConfig
+from litellm.types.router import RouterErrors, RouterSettingsDict, UpdateRouterConfig
 from litellm.types.secret_managers.main import KeyManagementSystem
 from litellm.types.utils import (
     CallTypes,
@@ -1982,6 +1982,7 @@ from litellm.models.team import TeamBase as TeamBase  # noqa: E402
 
 
 class NewTeamRequest(TeamBase):
+    router_settings: RouterSettingsDict | None = None
     model_aliases: dict | None = None
     tags: list | None = None
     guardrails: list[str] | None = None
@@ -2079,7 +2080,7 @@ class UpdateTeamRequest(LiteLLMPydanticObjectBase):
     allowed_vector_store_indexes: list[AllowedVectorStoreIndexItem] | None = None
     enforced_batch_output_expires_after: dict | None = None
     enforced_file_expires_after: dict | None = None
-    router_settings: dict | None = None
+    router_settings: RouterSettingsDict | None = None
     access_group_ids: list[str] | None = None
     budget_limits: list[BudgetLimitEntry] | None = None  # multiple concurrent budget windows
     default_team_member_models: list[str] | None = None  # default allowed_models seeded onto new team members

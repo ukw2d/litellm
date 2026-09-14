@@ -20,6 +20,10 @@ describe("hasRouterSettings", () => {
 });
 
 describe("routerSettingsEditorValue", () => {
+  it("should project stored provider splits for editing", () => {
+    const weights = { chat: { a: 8, b: 2 } };
+    expect(routerSettingsEditorValue({ weights })).toEqual({ router_settings: { weights } });
+  });
   it("should hand the editor only the fields it renders", () => {
     expect(
       routerSettingsEditorValue({
@@ -41,6 +45,13 @@ describe("routerSettingsEditorValue", () => {
 });
 
 describe("routerSettingsUpdate", () => {
+  it("should preserve a weight edit with unseen fields and clear the last override", () => {
+    const weights = { chat: { a: 8, b: 2 } };
+    expect(
+      routerSettingsUpdate({ weights }, { weights: { chat: { a: 1 } }, tag_routing_prefix: "team-" }),
+    ).toMatchObject({ weights, tag_routing_prefix: "team-" });
+    expect(routerSettingsUpdate({ weights: null }, { weights })).toEqual({});
+  });
   const fallbacks = [{ "gpt-4": ["gpt-4o"] }];
   // Accepted by UpdateRouterConfig on /key/update but not rendered by the accordion.
   const unsupported = {
@@ -101,6 +112,7 @@ describe("routerSettingsUpdate", () => {
       model_group_alias: null,
       enable_tag_filtering: null,
       routing_strategy_args: null,
+      weights: null,
     });
   });
 

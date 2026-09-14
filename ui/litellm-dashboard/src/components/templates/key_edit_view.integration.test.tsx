@@ -13,6 +13,7 @@ import {
   vectorStoreListCall,
 } from "../networking";
 import { KeyEditView } from "./key_edit_view";
+import { toast } from "@/lib/toast";
 
 const can = vi.fn();
 vi.mock("@/app/(dashboard)/hooks/useCan", () => ({
@@ -311,6 +312,34 @@ describe("KeyEditView", () => {
           }),
         );
       });
+    });
+
+    it("should submit edited provider weights alongside hidden settings", async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      renderWithRouterSettings(onSubmit);
+      routerSettingsMocks.editedValue = { weights: { chat: { primary: 4, backup: 1 } } };
+      fireEvent.click(screen.getByText("Save Changes"));
+      await waitFor(() =>
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            router_settings: expect.objectContaining({
+              ...UNSUPPORTED_STORED_FIELD,
+              weights: { chat: { primary: 4, backup: 1 } },
+            }),
+          }),
+        ),
+      );
+    });
+
+    it("should block saving provider weights with no positive deployment", async () => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      renderWithRouterSettings(onSubmit);
+      routerSettingsMocks.editedValue = { weights: { chat: { primary: 0 } } };
+      fireEvent.click(screen.getByText("Save Changes"));
+      await waitFor(() =>
+        expect(toast.fromError).toHaveBeenCalledWith("chat: at least one deployment must have a positive weight"),
+      );
+      expect(onSubmit).not.toHaveBeenCalled();
     });
   });
 

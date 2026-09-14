@@ -14111,3 +14111,67 @@ async def test_get_team_spend_by_user_rejects_bad_input(mock_db_client, team_ids
     assert exc_info.value.status_code == 400
     assert expected_error in str(exc_info.value.detail)
     mock_db_client.db.query_raw.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["new", "update", "patch"])
+async def test_team_router_weights_validate_before_persistence(monkeypatch, mock_admin_auth, surface):
+    from fastapi import Request
+    from litellm.proxy._types import NewTeamRequest, PatchTeamRequest
+    from litellm.proxy.management_endpoints.team_endpoints import new_team, patch_team
+
+    existing = LiteLLM_TeamTable(team_id="weight-team", models=[], metadata={})
+    writes = []
+
+    async def persist_team(*args, **kwargs):
+        data = kwargs["data"]
+        if "router_settings" in data:
+            writes.append(data)
+        decoded = {
+            key: json.loads(value) if key == "members_with_roles" and isinstance(value, str) else value
+            for key, value in data.items()
+        }
+        return LiteLLM_TeamTable.model_validate({**existing.model_dump(), **decoded})
+
+    team_table = SimpleNamespace(
+        count=AsyncMock(return_value=0),
+        find_unique=AsyncMock(return_value=existing),
+        create=AsyncMock(side_effect=persist_team),
+        update=AsyncMock(side_effect=persist_team),
+    )
+    db = SimpleNamespace(
+        db=SimpleNamespace(
+            litellm_teamtable=team_table,
+            litellm_proxymodeltable=SimpleNamespace(find_many=AsyncMock(return_value=[
+                SimpleNamespace(model_id="weight-id", model_name="group", model_info={}),
+            ])),
+        ),
+        get_data=AsyncMock(return_value=None),
+        jsonify_team_object=lambda db_data: db_data,
+    )
+    _wire_team_create_tx(db)
+    monkeypatch.setattr("litellm.proxy.proxy_server.prisma_client", db)
+    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", None)
+    monkeypatch.setattr("litellm.store_audit_logs", False)
+    monkeypatch.setattr("litellm.default_team_params", None)
+    monkeypatch.setattr("litellm.default_team_settings", None)
+    request = Request({"type": "http", "headers": []})
+
+    async def call(settings):
+        payload = {"team_id": "weight-team", "router_settings": settings}
+        if surface == "new":
+            return await new_team(data=NewTeamRequest(**payload), http_request=request, user_api_key_dict=mock_admin_auth)
+        if surface == "patch":
+            return await patch_team(
+                team_id="weight-team", data=PatchTeamRequest(**payload),
+                http_request=request, user_api_key_dict=mock_admin_auth,
+            )
+        return await update_team(data=UpdateTeamRequest(**payload), http_request=request, user_api_key_dict=mock_admin_auth)
+
+    settings = {"weights": {"group": {"weight-id": 70}}, "num_retries": 2, "custom_setting": True}
+    await call(settings)
+    assert len(writes) == 1
+    assert json.loads(writes[0]["router_settings"]) == settings
+    with pytest.raises(ProxyException, match="Unknown deployment ID"):
+        await call({"weights": {"group": {"unknown-id": 1}}})
+    assert len(writes) == 1

@@ -3,6 +3,16 @@ import { describe, expect, it } from "vitest";
 import RouterSettingsSummary from "./RouterSettingsSummary";
 
 describe("RouterSettingsSummary", () => {
+  it("shows deployment shares and warns when the strategy ignores weights", () => {
+    render(
+      <RouterSettingsSummary
+        routerSettings={{ routing_strategy: "least-busy", weights: { chat: { primary: 4, backup: 1 } } }}
+      />,
+    );
+    expect(screen.getByText("primary: 80% (weight 4)")).toBeInTheDocument();
+    expect(screen.getByText("backup: 20% (weight 1)")).toBeInTheDocument();
+    expect(screen.getByText("Inactive with least-busy; requires simple-shuffle")).toBeInTheDocument();
+  });
   it("should list each configured fallback mapping", () => {
     render(
       <RouterSettingsSummary

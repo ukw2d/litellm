@@ -35,7 +35,12 @@ import PassThroughRoutesSelector from "./common_components/PassThroughRoutesSele
 import AgentSelector from "./agent_management/AgentSelector";
 import ModelAliasManager from "./common_components/ModelAliasManager";
 import PremiumLoggingSettings from "./common_components/PremiumLoggingSettings";
-import RouterSettingsAccordion, { RouterSettingsAccordionValue } from "./common_components/RouterSettingsAccordion";
+import RouterSettingsAccordion, {
+  RouterSettingsAccordionRef,
+  RouterSettingsAccordionValue,
+} from "./common_components/RouterSettingsAccordion";
+import { hasRouterSettings } from "./common_components/routerSettingsPayload";
+import { providerWeightsError } from "./router_settings/providerWeightUtils";
 import { fetchAvailableModelsForTeamOrKey } from "./key_team_helpers/fetch_available_models_team_key";
 import type { Team } from "./key_team_helpers/key_list";
 import MCPServerSelector from "./mcp_server_management/MCPServerSelector";
@@ -270,6 +275,7 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
   const [loggingSettings, setLoggingSettings] = useState<any[]>([]);
   const [modelAliases, setModelAliases] = useState<{ [key: string]: string }>({});
   const [routerSettings, setRouterSettings] = useState<RouterSettingsAccordionValue | null>(null);
+  const routerSettingsRef = React.useRef<RouterSettingsAccordionRef>(null);
   const [routerSettingsKey, setRouterSettingsKey] = useState<number>(0);
 
   const { data: defaultTeamSettings } = useQuery({
@@ -523,15 +529,15 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
           formValues.model_aliases = modelAliases;
         }
 
-        // Add router_settings if any are defined
-        if (routerSettings?.router_settings) {
-          // Only include router_settings if it has at least one non-null value
-          const hasValues = Object.values(routerSettings.router_settings).some(
-            (value) => value !== null && value !== undefined && value !== "",
-          );
-          if (hasValues) {
-            formValues.router_settings = routerSettings.router_settings;
-          }
+        const currentRouterSettings =
+          routerSettingsRef.current?.getValue().router_settings ?? routerSettings?.router_settings;
+        const weightsError = providerWeightsError(currentRouterSettings?.weights);
+        if (weightsError) {
+          toast.fromError(weightsError);
+          return;
+        }
+        if (hasRouterSettings(currentRouterSettings)) {
+          formValues.router_settings = currentRouterSettings;
         }
 
         await teamCreateCall(accessToken, { ...formValues, models: normalizeTeamModelSelection(formValues.models) });
@@ -709,7 +715,7 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
               <DialogTitle>Create Team</DialogTitle>
             </DialogHeader>
             <TooltipProvider>
-              <form onSubmit={form.handleSubmit(onCreateSubmit)}>
+              <form onSubmit={(event) => void form.handleSubmit(onCreateSubmit)(event)}>
                 <FieldGroup>
                   <FormField control={form.control} name="team_alias" label="Team Name">
                     {({ ref, value, ...field }) => (
@@ -1237,6 +1243,7 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
                       <div className="mt-4 w-full">
                         <RouterSettingsAccordion
                           key={routerSettingsKey}
+                          ref={routerSettingsRef}
                           accessToken={accessToken || ""}
                           value={routerSettings || undefined}
                           onChange={setRouterSettings}

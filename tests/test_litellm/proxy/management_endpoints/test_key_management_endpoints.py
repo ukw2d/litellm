@@ -6589,6 +6589,8 @@ async def test_generate_key_with_router_settings(monkeypatch):
     2. Serializing router_settings to JSON when saving to database
     3. Storing router_settings in the key record
     """
+    from types import SimpleNamespace
+
     mock_prisma_client = AsyncMock()
     mock_prisma_client.jsonify_object = lambda data: data
 
@@ -6615,6 +6617,9 @@ async def test_generate_key_with_router_settings(monkeypatch):
         return_value=[]
     )
     mock_prisma_client.db.litellm_verificationtoken.count = AsyncMock(return_value=0)
+    mock_prisma_client.db.litellm_proxymodeltable.find_many = AsyncMock(return_value=[
+        SimpleNamespace(model_id="weighted-id", model_name="gpt-4", model_info={})
+    ])
 
     monkeypatch.setattr("litellm.proxy.proxy_server.prisma_client", mock_prisma_client)
 
@@ -6630,6 +6635,7 @@ async def test_generate_key_with_router_settings(monkeypatch):
         "routing_strategy": "usage-based",
         "num_retries": 3,
         "model_group_retry_policy": {"gpt-4": {"RateLimitErrorRetries": 5}},
+        "weights": {"gpt-4": {"weighted-id": 1}},
     }
 
     request_data = GenerateKeyRequest(
@@ -6680,19 +6686,39 @@ async def test_generate_key_with_router_settings(monkeypatch):
     # Verify router_settings matches input (regardless of serialization state)
     assert actual_settings == router_settings_data
 
+    mock_prisma_client.insert_data.reset_mock()
+    with pytest.raises(ProxyException, match="Unknown deployment ID"):
+        await generate_key_fn(
+            data=GenerateKeyRequest(router_settings={"weights": {"gpt-4": {"unknown-id": 1}}}),
+            user_api_key_dict=UserAPIKeyAuth(
+                user_role=LitellmUserRoles.PROXY_ADMIN,
+                user_id="user-router-1",
+            ),
+        )
+    mock_prisma_client.insert_data.assert_not_awaited()
+
 
 @pytest.mark.asyncio
-async def test_update_key_with_router_settings(monkeypatch):
+@pytest.mark.parametrize("request_name", ["UpdateKeyRequest", "RegenerateKeyRequest"])
+async def test_update_key_with_router_settings(monkeypatch, request_name):
     """
     Test that /key/update correctly handles router_settings by:
     1. Accepting router_settings as a dict parameter
     2. Serializing router_settings to JSON when updating database
     3. Updating router_settings in the key record
     """
-    from litellm.proxy._types import LiteLLM_VerificationToken, UpdateKeyRequest
+    from types import SimpleNamespace
+    from litellm.proxy import _types
+    from litellm.proxy._types import LiteLLM_VerificationToken
     from litellm.proxy.management_endpoints.key_management_endpoints import (
         prepare_key_update_data,
     )
+    table = SimpleNamespace(find_many=AsyncMock(return_value=[
+        SimpleNamespace(model_id="weighted-id", model_name="gpt-4", model_info={})
+    ]))
+    db = SimpleNamespace(db=SimpleNamespace(litellm_proxymodeltable=table))
+    monkeypatch.setattr("litellm.proxy.proxy_server.prisma_client", db)
+    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", None)
 
     # Mock existing key
     existing_key = LiteLLM_VerificationToken(
@@ -6710,9 +6736,11 @@ async def test_update_key_with_router_settings(monkeypatch):
     router_settings_data = {
         "routing_strategy": "latency-based",
         "num_retries": 2,
+        "weights": {"gpt-4": {"weighted-id": 1}},
     }
 
-    update_request = UpdateKeyRequest(
+    request_type = getattr(_types, request_name)
+    update_request = request_type(
         key="test-token-router", router_settings=router_settings_data
     )
 
@@ -6727,6 +6755,12 @@ async def test_update_key_with_router_settings(monkeypatch):
     # Verify router_settings can be deserialized and matches input
     deserialized_settings = json.loads(result["router_settings"])
     assert deserialized_settings == router_settings_data
+
+    with pytest.raises(HTTPException, match="Unknown deployment ID"):
+        await prepare_key_update_data(
+            data=request_type(key="test-token-router", router_settings={"weights": {"gpt-4": {"unknown-id": 1}}}),
+            existing_key_row=existing_key,
+        )
 
 
 @pytest.mark.asyncio

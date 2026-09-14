@@ -92,6 +92,9 @@ import SearchToolSelector from "../search_tools/SearchToolSelector";
 import SkillSelector from "../skills/SkillSelector";
 import EditLoggingSettings from "./EditLoggingSettings";
 import RouterSettingsAccordion, { RouterSettingsAccordionRef } from "../common_components/RouterSettingsAccordion";
+import RouterSettingsSummary from "../common_components/RouterSettingsSummary";
+import { routerSettingsUpdate } from "../common_components/routerSettingsPayload";
+import { providerWeightsError } from "../router_settings/providerWeightUtils";
 import MemberModal from "./EditMembership";
 import MemberPermissions from "./member_permissions";
 import MyUserTab from "./MyUserTab";
@@ -1073,23 +1076,17 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
         updateData.model_aliases = teamModelAliases;
       }
 
-      // Handle router_settings - read fresh values from DOM at save time.
-      const currentRouterSettings = routerSettingsRef.current?.getValue();
-      if (currentRouterSettings?.router_settings) {
-        const isMeaningfulValue = (value: unknown) =>
-          value !== null &&
-          value !== undefined &&
-          value !== "" &&
-          value !== false &&
-          !(Array.isArray(value) && value.length === 0);
-
-        const hasNewValues = Object.values(currentRouterSettings.router_settings).some(isMeaningfulValue);
-        const hadExistingSettings = info.router_settings && Object.values(info.router_settings).some(isMeaningfulValue);
-
-        // Send if there are new values OR if the user is clearing existing ones
-        if (hasNewValues || hadExistingSettings) {
-          updateData.router_settings = currentRouterSettings.router_settings;
-        }
+      const currentRouterSettings = routerSettingsUpdate(
+        routerSettingsRef.current?.getValue().router_settings,
+        info.router_settings,
+      );
+      const weightsError = providerWeightsError(currentRouterSettings?.weights);
+      if (weightsError) {
+        toast.fromError(weightsError);
+        return;
+      }
+      if (currentRouterSettings) {
+        updateData.router_settings = currentRouterSettings;
       }
 
       await teamUpdateCall(accessToken, updateData);
@@ -2054,39 +2051,7 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
               </div>
               <div>
                 <p className="font-medium">Router Settings</p>
-                {info.router_settings &&
-                Object.values(info.router_settings).some(
-                  (v) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0),
-                ) ? (
-                  <div className="mt-1 space-y-1">
-                    {info.router_settings.routing_strategy && (
-                      <div>
-                        Routing Strategy: <Badge variant="secondary">{info.router_settings.routing_strategy}</Badge>
-                      </div>
-                    )}
-                    {info.router_settings.num_retries != null && (
-                      <div>Number of Retries: {info.router_settings.num_retries}</div>
-                    )}
-                    {info.router_settings.allowed_fails != null && (
-                      <div>Allowed Failures: {info.router_settings.allowed_fails}</div>
-                    )}
-                    {info.router_settings.cooldown_time != null && (
-                      <div>Cooldown Time: {info.router_settings.cooldown_time}s</div>
-                    )}
-                    {info.router_settings.timeout != null && <div>Timeout: {info.router_settings.timeout}s</div>}
-                    {info.router_settings.retry_after != null && (
-                      <div>Retry After: {info.router_settings.retry_after}s</div>
-                    )}
-                    {info.router_settings.fallbacks &&
-                      Array.isArray(info.router_settings.fallbacks) &&
-                      info.router_settings.fallbacks.length > 0 && (
-                        <div>Fallbacks: {info.router_settings.fallbacks.length} configured</div>
-                      )}
-                    {info.router_settings.enable_tag_filtering && <div>Tag Filtering: Enabled</div>}
-                  </div>
-                ) : (
-                  <div className="text-muted-foreground">No router settings configured</div>
-                )}
+                <RouterSettingsSummary routerSettings={info.router_settings} />
               </div>
               <div>
                 <p className="font-medium">Organization ID</p>

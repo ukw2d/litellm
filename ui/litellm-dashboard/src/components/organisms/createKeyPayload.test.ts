@@ -360,6 +360,21 @@ describe("premium and rotation flags", () => {
 });
 
 describe("keys sourced from component state", () => {
+  it("sends valid provider weights without changing deployment IDs or ratios", () => {
+    const weights = { chat: { primary: 4, backup: 1 } };
+    expect(
+      payloadOf(build({ key_alias: "my-key" }, { routerSettings: { router_settings: { weights } } })),
+    ).toStrictEqual(aliasOnly({ router_settings: { weights } }));
+  });
+
+  it("blocks key creation when a provider split has no positive deployment", () => {
+    expect(
+      build({ key_alias: "my-key" }, { routerSettings: { router_settings: { weights: { chat: { primary: 0 } } } } }),
+    ).toEqual({
+      kind: "invalid_provider_weights",
+      message: "chat: at least one deployment must have a positive weight",
+    });
+  });
   it("serialises model aliases", () => {
     expect(payloadOf(build({ key_alias: "my-key" }, { modelAliases: { fast: "gpt-4o-mini" } }))).toStrictEqual(
       aliasOnly({ aliases: '{"fast":"gpt-4o-mini"}' }),

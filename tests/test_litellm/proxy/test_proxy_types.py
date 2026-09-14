@@ -276,3 +276,70 @@ def test_a_server_only_marker_is_not_taken_from_the_caller(field, forged, defaul
     auth = UserAPIKeyAuth(api_key="sk-1234", **{field: forged})
 
     assert getattr(auth, field) == default
+
+
+@pytest.mark.parametrize(
+    "request_name,fields",
+    [
+        ("GenerateKeyRequest", {}),
+        ("UpdateKeyRequest", {"key": "sk-test"}),
+        ("RegenerateKeyRequest", {}),
+        ("NewTeamRequest", {}),
+        ("UpdateTeamRequest", {"team_id": "team"}),
+        ("PatchTeamRequest", {}),
+    ],
+)
+@pytest.mark.parametrize(
+    "weights",
+    [
+        [],
+        {"group": []},
+        {"group": {"id": True}},
+        {"group": {"id": "1"}},
+        {"group": {"id": -1}},
+        {"group": {"id": float("nan")}},
+        {"group": {"id": float("inf")}},
+        {"group": {"id": 0}},
+        {"": {"id": 1}},
+        {"   ": {"id": 1}},
+        {"group": {"": 1}},
+        {"group": {"\t": 1}},
+    ],
+)
+def test_scoped_router_weights_reject_invalid_writes(request_name, fields, weights):
+    from pydantic import ValidationError
+    from litellm.proxy import _types
+
+    request_type = getattr(_types, request_name)
+    with pytest.raises(ValidationError):
+        request_type(router_settings={"weights": weights}, **fields)
+
+
+@pytest.mark.parametrize("weights", [None, {}, {"group": {}}, {"group": {"a": 70, "b": 0.5}}])
+@pytest.mark.parametrize("request_name,fields", [
+    ("GenerateKeyRequest", {}),
+    ("UpdateKeyRequest", {"key": "sk-test"}),
+    ("RegenerateKeyRequest", {}),
+    ("NewTeamRequest", {}),
+    ("UpdateTeamRequest", {"team_id": "team"}),
+    ("PatchTeamRequest", {}),
+])
+def test_scoped_router_weights_preserve_settings_and_clears(request_name, fields, weights):
+    from litellm.proxy import _types
+
+    request_type = getattr(_types, request_name)
+    request = request_type(router_settings={"weights": weights, "num_retries": 2}, **fields)
+    payload = request.model_dump(exclude_unset=True)["router_settings"]
+    assert payload == {"weights": weights, "num_retries": 2}
+    schema = request_type.model_json_schema()
+    assert "weights" in schema["$defs"]["UpdateRouterConfig"]["properties"]
+
+
+def test_team_router_weights_leave_legacy_rows_and_other_settings_readable():
+    from litellm.proxy._types import LiteLLM_TeamTable, NewTeamRequest, UpdateTeamRequest
+
+    legacy_settings = {"weights": {"old-group": {"old-id": "legacy"}}, "custom_setting": {"flag": True}}
+    assert LiteLLM_TeamTable(team_id="team", router_settings=legacy_settings).router_settings == legacy_settings
+    settings = {"weights": {"group": {"id": 1}}, "custom_setting": {"flag": True}}
+    assert NewTeamRequest(router_settings=settings).router_settings == settings
+    assert UpdateTeamRequest(team_id="team", router_settings=settings).router_settings == settings

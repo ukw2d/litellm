@@ -1,5 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import { hasRouterSettings } from "./routerSettingsPayload";
+import {
+  providerWeightsError,
+  providerWeightShares,
+  ProviderWeightsValue,
+} from "../router_settings/providerWeightUtils";
 
 interface RouterSettingsSummaryProps {
   routerSettings: Record<string, unknown> | null | undefined;
@@ -23,6 +28,7 @@ export default function RouterSettingsSummary({
 
   const settings = routerSettings as Record<string, unknown>;
   const fallbacks = fallbackEntries(settings.fallbacks);
+  const weights = !providerWeightsError(settings.weights) ? (settings.weights as ProviderWeightsValue | null) : null;
 
   return (
     <div className="space-y-1 text-sm">
@@ -37,6 +43,26 @@ export default function RouterSettingsSummary({
       {settings.timeout != null && <div>Timeout: {String(settings.timeout)}s</div>}
       {settings.retry_after != null && <div>Retry After: {String(settings.retry_after)}s</div>}
       {Boolean(settings.enable_tag_filtering) && <div>Tag Filtering: Enabled</div>}
+      {weights && Object.keys(weights).length > 0 && (
+        <div className="space-y-1">
+          <div>Provider traffic split:</div>
+          {Object.entries(weights).map(([group, deployments]) => (
+            <div key={group} className="text-xs text-muted-foreground">
+              <span className="font-medium">{group}</span>
+              {Object.entries(providerWeightShares(deployments)).map(([id, share]) => (
+                <div key={id} className="break-all">
+                  {id}: {Number(share.toFixed(2))}% (weight {deployments[id]})
+                </div>
+              ))}
+            </div>
+          ))}
+          <div className="text-xs text-muted-foreground">
+            {settings.routing_strategy && settings.routing_strategy !== "simple-shuffle"
+              ? `Inactive with ${String(settings.routing_strategy)}; requires simple-shuffle`
+              : "Random request targets with simple-shuffle; health checks and failover still apply"}
+          </div>
+        </div>
+      )}
       {fallbacks.length > 0 && (
         <div>
           <div>Fallbacks:</div>
